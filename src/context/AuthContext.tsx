@@ -31,10 +31,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
       setLoading(false);
-      // Try to load local progress if no supabase
-      const localProgress = localStorage.getItem('local_progress');
+      // One-time migration from old key, then load
+      const legacy = localStorage.getItem('local_progress');
+      if (legacy && !localStorage.getItem('pdp_progress')) {
+        localStorage.setItem('pdp_progress', legacy);
+        localStorage.removeItem('local_progress');
+      }
+      const localProgress = localStorage.getItem('pdp_progress');
       if (localProgress) {
-        setCompletedVideos(JSON.parse(localProgress));
+        try {
+          setCompletedVideos(JSON.parse(localProgress));
+        } catch {}
       }
       setIsAdmin(localStorage.getItem('isAdmin') === 'true');
       return;
@@ -106,7 +113,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (!user || !supabase) {
       // Local fallback
-      localStorage.setItem('local_progress', JSON.stringify(newProgress));
+      localStorage.setItem('pdp_progress', JSON.stringify(newProgress));
       return;
     }
 
@@ -138,7 +145,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, completedVideos, toggleVideoCompletion, signOut, isSupabaseConfigured }}>
+    <AuthContext.Provider value={{ user, loading, completedVideos, toggleVideoCompletion, signOut, isSupabaseConfigured, isAdmin }}>
       {children}
     </AuthContext.Provider>
   );

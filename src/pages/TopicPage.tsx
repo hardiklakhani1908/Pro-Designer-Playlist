@@ -1,19 +1,26 @@
 import React, { useState } from 'react';
 import { useParams, Link, Navigate } from 'react-router-dom';
 import { useData } from '../context/DataContext';
-import { ArrowLeft, CheckCircle2, Circle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Circle, ListVideo } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
 import { VideoModal } from '../components/VideoModal';
+import { parseYouTubeUrl, getThumbnailUrl } from '../lib/youtube';
+
+interface SelectedMedia {
+  videoId: string | null;
+  playlistId: string | null;
+  title: string;
+}
 
 export const TopicPage = () => {
   const { topicSlug } = useParams();
   const { completedVideos, toggleVideoCompletion } = useAuth();
   const { modules, topics, videos: allVideos } = useData();
-  const [selectedVideo, setSelectedVideo] = useState<{id: string, title: string} | null>(null);
-  
+  const [selectedVideo, setSelectedVideo] = useState<SelectedMedia | null>(null);
+
   const topic = topics.find(t => t.slug === topicSlug);
-  
+
   if (!topic) {
     return <Navigate to="/" />;
   }
@@ -53,36 +60,66 @@ export const TopicPage = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {videos.map(video => {
             const isCompleted = completedVideos[video.id];
-            
+            const parsed = parseYouTubeUrl(video.youtube_url);
+            const videoId = video.youtube_id || parsed.videoId;
+            const playlistId = parsed.playlistId;
+            const isPlaylist = !videoId && Boolean(playlistId);
+            const isPlayable = Boolean(videoId || playlistId);
+            const thumbnail = getThumbnailUrl({ videoId, thumbnail: video.thumbnail });
+
+            const open = () => {
+              if (!isPlayable) return;
+              setSelectedVideo({ videoId, playlistId, title: video.title });
+            };
+
             return (
-              <div 
-                key={video.id} 
+              <div
+                key={video.id}
                 className={cn(
                   "group relative rounded-xl overflow-hidden bg-[#0A0A0A] border transition-all duration-300",
                   isCompleted ? "border-[#4ade80]/30" : "border-[#1f1f1f] hover:border-[#333]"
                 )}
               >
-                <button 
-                  onClick={() => setSelectedVideo({ id: video.youtube_id, title: video.title })} 
-                  className="block w-full relative aspect-video overflow-hidden text-left focus:outline-none focus:ring-2 focus:ring-[#f7f8f8] focus:ring-offset-2 focus:ring-offset-[#0A0A0A]"
+                <button
+                  onClick={open}
+                  disabled={!isPlayable}
+                  className="block w-full relative aspect-video overflow-hidden text-left focus:outline-none focus:ring-2 focus:ring-[#f7f8f8] focus:ring-offset-2 focus:ring-offset-[#0A0A0A] disabled:cursor-not-allowed"
                 >
-                  <img 
-                    src={video.thumbnail} 
-                    alt={video.title} 
-                    className={cn(
-                      "w-full h-full object-cover transition-transform duration-500 group-hover:scale-105",
-                      isCompleted && "opacity-60 grayscale"
-                    )}
-                  />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <div className="px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-md text-white text-xs font-medium border border-white/20">
-                      Play Video
+                  {thumbnail ? (
+                    <img
+                      src={thumbnail}
+                      alt={video.title}
+                      className={cn(
+                        "w-full h-full object-cover transition-transform duration-500 group-hover:scale-105",
+                        isCompleted && "opacity-60 grayscale"
+                      )}
+                    />
+                  ) : (
+                    <div
+                      className={cn(
+                        "w-full h-full flex items-center justify-center bg-gradient-to-br from-[#1a1a1a] via-[#111] to-[#0a0a0a]",
+                        isCompleted && "opacity-60 grayscale"
+                      )}
+                    >
+                      <ListVideo size={48} className="text-[#5a5f68]" />
                     </div>
-                  </div>
+                  )}
+                  {isPlaylist && (
+                    <div className="absolute top-2 right-2 px-2 py-1 rounded-md bg-black/70 backdrop-blur-sm text-white text-[10px] font-mono uppercase tracking-wider flex items-center gap-1 border border-white/10">
+                      <ListVideo size={12} /> Playlist
+                    </div>
+                  )}
+                  {isPlayable && (
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <div className="px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-md text-white text-xs font-medium border border-white/20">
+                        {isPlaylist ? 'Open Playlist' : 'Play Video'}
+                      </div>
+                    </div>
+                  )}
                 </button>
-                
+
                 <div className="p-4 flex gap-3">
-                  <button 
+                  <button
                     onClick={() => toggleVideoCompletion(video.id)}
                     className="flex-shrink-0 mt-0.5 text-[#8a8f98] hover:text-white transition-colors"
                   >
@@ -96,9 +133,10 @@ export const TopicPage = () => {
                     <p className="text-[10px] uppercase font-mono tracking-wider font-semibold text-[#8a8f98] mb-1.5 truncate">
                       {video.channel}
                     </p>
-                    <button 
-                      onClick={() => setSelectedVideo({ id: video.youtube_id, title: video.title })}
-                      className="text-left w-full hover:underline focus:outline-none"
+                    <button
+                      onClick={open}
+                      disabled={!isPlayable}
+                      className="text-left w-full hover:underline focus:outline-none disabled:cursor-not-allowed disabled:no-underline"
                     >
                       <h3 className={cn(
                         "text-sm font-medium leading-snug line-clamp-2 transition-colors hover:text-white",
@@ -115,10 +153,11 @@ export const TopicPage = () => {
         </div>
       )}
 
-      <VideoModal 
-        isOpen={selectedVideo !== null} 
-        onClose={() => setSelectedVideo(null)} 
-        youtubeId={selectedVideo?.id || null}
+      <VideoModal
+        isOpen={selectedVideo !== null}
+        onClose={() => setSelectedVideo(null)}
+        videoId={selectedVideo?.videoId || null}
+        playlistId={selectedVideo?.playlistId || null}
         title={selectedVideo?.title || null}
       />
     </div>

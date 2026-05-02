@@ -25,9 +25,9 @@ import { writeFile } from 'fs/promises';
 loadEnv({ path: '.env.local' });
 loadEnv({ path: '.env' });
 
-const API_KEY = process.env.YOUTUBE_API_KEY;
+const API_KEY = process.env.VITE_YOUTUBE_API_KEY || process.env.YOUTUBE_API_KEY;
 if (!API_KEY) {
-  console.error('Missing YOUTUBE_API_KEY in .env.local');
+  console.error('Missing VITE_YOUTUBE_API_KEY in .env.local');
   process.exit(1);
 }
 

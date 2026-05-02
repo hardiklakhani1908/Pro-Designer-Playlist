@@ -53,6 +53,11 @@ interface DataContextType {
   updateTopic: (id: string, topic: Partial<Topic>) => void;
   addTopic: (topic: Omit<Topic, 'id'>) => void;
   deleteTopic: (id: string) => void;
+  addPlaylistWithVideos: (input: {
+    playlist: Playlist;
+    videos: Omit<Video, 'id'>[];
+  }) => { added: boolean; reason?: string };
+  deletePlaylist: (id: string) => void;
 }
 
 const DataContext = createContext<DataContextType | null>(null);
@@ -171,6 +176,58 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
+  const addPlaylistWithVideos = (input: {
+    playlist: Playlist;
+    videos: Omit<Video, 'id'>[];
+  }): { added: boolean; reason?: string } => {
+    let result: { added: boolean; reason?: string } = { added: true };
+    setData((prev) => {
+      if (prev.playlists.some((p) => p.id === input.playlist.id)) {
+        result = { added: false, reason: 'A playlist with this ID is already in the library' };
+        return prev;
+      }
+      const topic = prev.topics.find((t) => t.id === input.playlist.topic_id);
+      const videos: Video[] = input.videos.map((v, idx) => ({
+        ...v,
+        id: `vid-${input.playlist.id}-${idx}`,
+        topic: topic?.name || v.topic_id,
+      }));
+      const updatedTopics = topic
+        ? prev.topics.map((t) =>
+            t.id === topic.id ? { ...t, video_count: t.video_count + videos.length } : t
+          )
+        : prev.topics;
+      return {
+        ...prev,
+        topics: updatedTopics,
+        playlists: [...prev.playlists, input.playlist],
+        videos: [...videos, ...prev.videos],
+      };
+    });
+    return result;
+  };
+
+  const deletePlaylist = (id: string) => {
+    setData((prev) => {
+      const removed = prev.videos.filter((v) => v.playlist_id === id);
+      const removedByTopic: Record<string, number> = {};
+      for (const v of removed) {
+        removedByTopic[v.topic_id] = (removedByTopic[v.topic_id] || 0) + 1;
+      }
+      const updatedTopics = prev.topics.map((t) =>
+        removedByTopic[t.id]
+          ? { ...t, video_count: Math.max(0, t.video_count - removedByTopic[t.id]) }
+          : t
+      );
+      return {
+        ...prev,
+        topics: updatedTopics,
+        playlists: prev.playlists.filter((p) => p.id !== id),
+        videos: prev.videos.filter((v) => v.playlist_id !== id),
+      };
+    });
+  };
+
   const deleteTopic = (id: string) => {
     setData(prev => ({
       ...prev,
@@ -195,7 +252,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updateModule,
       updateTopic,
       addTopic,
-      deleteTopic
+      deleteTopic,
+      addPlaylistWithVideos,
+      deletePlaylist,
     }}>
       {children}
     </DataContext.Provider>

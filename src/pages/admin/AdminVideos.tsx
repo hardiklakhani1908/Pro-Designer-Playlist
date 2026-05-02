@@ -1,12 +1,21 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useData, Video } from '../../context/DataContext';
-import { Plus, Pencil, Trash2, X, Loader2, Check } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Loader2, Check, ListVideo, Video as VideoIcon } from 'lucide-react';
 import { parseYouTubeUrl, isYouTubeUrl } from '../../lib/youtube';
 import { canWriteToSanity, createVideo as createVideoInSanity } from '../../lib/sanity';
+import {
+  extractPlaylistId,
+  fetchPlaylistData,
+  isYouTubeApiConfigured,
+  type FetchedPlaylistData,
+} from '../../lib/youtubeApi';
 import { Toast, type ToastState } from '../../components/Toast';
 
+type Mode = 'single' | 'playlist';
+
 type FormErrors = Partial<Record<'url' | 'title' | 'moduleId' | 'topicId', string>>;
+type PlaylistErrors = Partial<Record<'url' | 'moduleId' | 'topicId', string>>;
 
 interface OEmbedResponse {
   title?: string;
@@ -14,7 +23,7 @@ interface OEmbedResponse {
   thumbnail_url?: string;
 }
 
-const initialState = {
+const initialSingleForm = {
   url: '',
   title: '',
   channel: '',
@@ -25,20 +34,39 @@ const initialState = {
   youtubeId: '',
 };
 
+const initialPlaylistForm = {
+  url: '',
+  moduleId: '',
+  topicId: '',
+};
+
 export const AdminVideos = () => {
-  const { videos, topics, modules, addVideo, updateVideo, deleteVideo } = useData();
+  const { videos, topics, modules, addVideo, updateVideo, deleteVideo, addPlaylistWithVideos } = useData();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [mode, setMode] = useState<Mode>('single');
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(initialState);
-  const [errors, setErrors] = useState<FormErrors>({});
-  const [isFetchingMeta, setIsFetchingMeta] = useState(false);
-  const [hasFetched, setHasFetched] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Single-video form state
+  const [form, setForm] = useState(initialSingleForm);
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [isFetchingMeta, setIsFetchingMeta] = useState(false);
+  const [hasFetched, setHasFetched] = useState(false);
+
+  // Playlist form state
+  const [pForm, setPForm] = useState(initialPlaylistForm);
+  const [pErrors, setPErrors] = useState<PlaylistErrors>({});
+  const [pData, setPData] = useState<FetchedPlaylistData | null>(null);
+  const [isFetchingPlaylist, setIsFetchingPlaylist] = useState(false);
+
   const setField = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const setPField = <K extends keyof typeof pForm>(key: K, value: (typeof pForm)[K]) => {
+    setPForm((prev) => ({ ...prev, [key]: value }));
   };
 
   const filteredTopics = useMemo(
@@ -46,20 +74,31 @@ export const AdminVideos = () => {
     [topics, form.moduleId]
   );
 
-  const resetForm = () => {
-    setForm(initialState);
+  const pFilteredTopics = useMemo(
+    () => (pForm.moduleId ? topics.filter((t) => t.module_id === pForm.moduleId) : []),
+    [topics, pForm.moduleId]
+  );
+
+  const resetAll = () => {
+    setForm(initialSingleForm);
     setErrors({});
-    setEditingId(null);
     setIsFetchingMeta(false);
     setHasFetched(false);
+    setPForm(initialPlaylistForm);
+    setPErrors({});
+    setPData(null);
+    setIsFetchingPlaylist(false);
+    setEditingId(null);
+    setMode('single');
   };
 
   const openAddModal = () => {
-    resetForm();
+    resetAll();
     setIsModalOpen(true);
   };
 
   const openEditModal = (video: Video) => {
+    resetAll();
     const topic = topics.find((t) => t.id === video.topic_id);
     setForm({
       url: video.youtube_url,
@@ -71,11 +110,12 @@ export const AdminVideos = () => {
       thumbnail: video.thumbnail || '',
       youtubeId: video.youtube_id || '',
     });
-    setErrors({});
     setEditingId(video.id);
     setHasFetched(Boolean(video.thumbnail));
     setIsModalOpen(true);
   };
+
+  // ----- Single-video handlers -----
 
   const handleUrlBlur = async () => {
     const trimmed = form.url.trim();
@@ -123,7 +163,7 @@ export const AdminVideos = () => {
     }
   };
 
-  const validate = (): FormErrors => {
+  const validateSingle = (): FormErrors => {
     const next: FormErrors = {};
     const trimmed = form.url.trim();
     if (!trimmed) next.url = 'YouTube URL is required';
@@ -136,14 +176,12 @@ export const AdminVideos = () => {
     return next;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const next = validate();
+  const submitSingle = async () => {
+    const next = validateSingle();
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
     setIsSaving(true);
-
     const topic = topics.find((t) => t.id === form.topicId);
     const payload = {
       title: form.title.trim(),
@@ -157,15 +195,9 @@ export const AdminVideos = () => {
     };
 
     try {
-      if (editingId) {
-        updateVideo(editingId, payload);
-      } else {
-        addVideo(payload);
-      }
+      if (editingId) updateVideo(editingId, payload);
+      else addVideo(payload);
 
-      // Best-effort write to Sanity. Silent no-op if not configured.
-      // The topic_id here is the local DataContext id; once Sanity holds the
-      // canonical topics, swap this for the real Sanity topic _id.
       if (canWriteToSanity && !editingId) {
         try {
           await createVideoInSanity({
@@ -182,21 +214,109 @@ export const AdminVideos = () => {
         }
       }
 
-      setToast({
-        message: editingId ? 'Video updated' : 'Video added',
-        variant: 'success',
-      });
+      setToast({ message: editingId ? 'Video updated' : 'Video added', variant: 'success' });
       setIsModalOpen(false);
-      resetForm();
+      resetAll();
     } catch (err) {
-      setToast({
-        message: 'Save failed. Check the console.',
-        variant: 'error',
-      });
+      setToast({ message: 'Save failed. Check the console.', variant: 'error' });
       console.error(err);
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // ----- Playlist handlers -----
+
+  const handlePlaylistBlur = async () => {
+    const trimmed = pForm.url.trim();
+    if (!trimmed) {
+      setPErrors((e) => ({ ...e, url: 'Playlist URL or ID is required' }));
+      return;
+    }
+    const playlistId = extractPlaylistId(trimmed);
+    if (!playlistId) {
+      setPErrors((e) => ({ ...e, url: 'Could not find a playlist ID in that input' }));
+      return;
+    }
+    if (!isYouTubeApiConfigured) {
+      setPErrors((e) => ({ ...e, url: 'VITE_YOUTUBE_API_KEY is not set in env' }));
+      return;
+    }
+    setPErrors((e) => ({ ...e, url: undefined }));
+    setPData(null);
+    setIsFetchingPlaylist(true);
+    try {
+      const data = await fetchPlaylistData(playlistId);
+      setPData(data);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not fetch playlist';
+      setPErrors((e) => ({ ...e, url: msg }));
+    } finally {
+      setIsFetchingPlaylist(false);
+    }
+  };
+
+  const validatePlaylist = (): PlaylistErrors => {
+    const next: PlaylistErrors = {};
+    if (!pData) next.url = 'Fetch the playlist first';
+    if (!pForm.moduleId) next.moduleId = 'Pick a module';
+    if (!pForm.topicId) next.topicId = 'Pick a topic';
+    return next;
+  };
+
+  const submitPlaylist = async () => {
+    const next = validatePlaylist();
+    setPErrors(next);
+    if (Object.keys(next).length > 0 || !pData) return;
+
+    setIsSaving(true);
+    try {
+      const result = addPlaylistWithVideos({
+        playlist: {
+          id: pData.playlist.id,
+          title: pData.playlist.title,
+          channel: pData.playlist.channel,
+          thumbnail: pData.playlist.thumbnail,
+          video_count: pData.videos.length,
+          topic_id: pForm.topicId,
+        },
+        videos: pData.videos.map((v) => ({
+          title: v.title,
+          channel: v.channel,
+          youtube_url: `https://www.youtube.com/watch?v=${v.videoId}&list=${pData.playlist.id}`,
+          youtube_id: v.videoId,
+          thumbnail: v.thumbnail,
+          topic: '',
+          duration: v.duration,
+          topic_id: pForm.topicId,
+          playlist_id: pData.playlist.id,
+        })),
+      });
+
+      if (!result.added) {
+        setToast({ message: result.reason || 'Playlist could not be added', variant: 'error' });
+        setIsSaving(false);
+        return;
+      }
+
+      setToast({
+        message: `Added "${pData.playlist.title}" with ${pData.videos.length} videos`,
+        variant: 'success',
+      });
+      setIsModalOpen(false);
+      resetAll();
+    } catch (err) {
+      setToast({ message: 'Save failed. Check the console.', variant: 'error' });
+      console.error(err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mode === 'single') submitSingle();
+    else submitPlaylist();
   };
 
   const handleDelete = (id: string) => {
@@ -224,7 +344,7 @@ export const AdminVideos = () => {
           onClick={openAddModal}
           className="flex items-center gap-2 px-4 py-2 bg-white text-black font-semibold text-sm rounded-md hover:bg-gray-200 transition-colors"
         >
-          <Plus size={16} strokeWidth={2.25} /> Add New Video
+          <Plus size={16} strokeWidth={2.25} /> Add New
         </button>
       </div>
 
@@ -280,7 +400,7 @@ export const AdminVideos = () => {
               {videos.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-[#8a8f98]">
-                    No videos found. Click "Add New Video" to get started.
+                    No videos found. Click "Add New" to get started.
                   </td>
                 </tr>
               )}
@@ -311,7 +431,7 @@ export const AdminVideos = () => {
             >
               <div className="flex items-center justify-between p-4 border-b border-[#1a1a1a] flex-shrink-0">
                 <h3 className="font-semibold text-white tracking-tight">
-                  {editingId ? 'Edit Video' : 'Add New Video'}
+                  {editingId ? 'Edit Video' : mode === 'playlist' ? 'Add Playlist' : 'Add New Video'}
                 </h3>
                 <button
                   onClick={() => !isSaving && setIsModalOpen(false)}
@@ -323,155 +443,291 @@ export const AdminVideos = () => {
               </div>
 
               <form onSubmit={handleSubmit} className="p-5 space-y-5 overflow-y-auto">
-                {/* YouTube URL */}
-                <Field
-                  label="YouTube URL"
-                  htmlFor="yt-url"
-                  required
-                  error={errors.url}
-                  hint="Paste a youtube.com or youtu.be link — we'll auto-fill the rest"
-                >
-                  <div className="relative">
-                    <input
-                      id="yt-url"
-                      type="url"
-                      value={form.url}
-                      onChange={(e) => setField('url', e.target.value)}
-                      onBlur={handleUrlBlur}
-                      className={inputClass(errors.url)}
-                      placeholder="https://www.youtube.com/watch?v=..."
-                      disabled={isSaving}
+                {/* Mode toggle (Add only) */}
+                {!editingId && (
+                  <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-[#0f0f0f] border border-[#1a1a1a]">
+                    <ModeButton
+                      active={mode === 'single'}
+                      onClick={() => setMode('single')}
+                      icon={<VideoIcon size={14} strokeWidth={1.75} />}
+                      label="Single Video"
                     />
-                    {isFetchingMeta && (
-                      <Loader2
-                        size={14}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#8a8f98]"
-                      />
-                    )}
+                    <ModeButton
+                      active={mode === 'playlist'}
+                      onClick={() => setMode('playlist')}
+                      icon={<ListVideo size={14} strokeWidth={1.75} />}
+                      label="Playlist"
+                    />
                   </div>
-                </Field>
+                )}
 
-                {/* Thumbnail preview */}
-                <AnimatePresence initial={false}>
-                  {form.thumbnail && hasFetched && (
+                <AnimatePresence mode="wait" initial={false}>
+                  {mode === 'single' ? (
                     <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.25 }}
+                      key="single"
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.15 }}
+                      className="space-y-5"
                     >
-                      <div className="aspect-video w-full rounded-lg overflow-hidden bg-[#0f0f0f] border border-[#1f1f1f]">
-                        <img src={form.thumbnail} alt="" className="w-full h-full object-cover" />
+                      <Field
+                        label="YouTube URL"
+                        htmlFor="yt-url"
+                        required
+                        error={errors.url}
+                        hint="Paste a youtube.com or youtu.be link — we'll auto-fill the rest"
+                      >
+                        <div className="relative">
+                          <input
+                            id="yt-url"
+                            type="url"
+                            value={form.url}
+                            onChange={(e) => setField('url', e.target.value)}
+                            onBlur={handleUrlBlur}
+                            className={inputClass(errors.url)}
+                            placeholder="https://www.youtube.com/watch?v=..."
+                            disabled={isSaving}
+                          />
+                          {isFetchingMeta && (
+                            <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#8a8f98]" />
+                          )}
+                        </div>
+                      </Field>
+
+                      <AnimatePresence initial={false}>
+                        {form.thumbnail && hasFetched && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.25 }}
+                          >
+                            <div className="aspect-video w-full rounded-lg overflow-hidden bg-[#0f0f0f] border border-[#1f1f1f]">
+                              <img src={form.thumbnail} alt="" className="w-full h-full object-cover" />
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      <Field label="Video Title" htmlFor="yt-title" required error={errors.title}>
+                        {isFetchingMeta && !form.title ? (
+                          <Skeleton className="h-9" />
+                        ) : (
+                          <input
+                            id="yt-title"
+                            type="text"
+                            value={form.title}
+                            onChange={(e) => setField('title', e.target.value)}
+                            onBlur={() =>
+                              setErrors((er) => ({
+                                ...er,
+                                title: form.title.trim() ? undefined : 'Title is required',
+                              }))
+                            }
+                            className={inputClass(errors.title)}
+                            placeholder="Auto-filled from YouTube"
+                            disabled={isSaving}
+                          />
+                        )}
+                      </Field>
+
+                      <Field label="Channel" htmlFor="yt-channel">
+                        {isFetchingMeta && !form.channel ? (
+                          <Skeleton className="h-9" />
+                        ) : (
+                          <input
+                            id="yt-channel"
+                            type="text"
+                            value={form.channel}
+                            onChange={(e) => setField('channel', e.target.value)}
+                            className={inputClass()}
+                            placeholder="Auto-filled from YouTube"
+                            disabled={isSaving}
+                          />
+                        )}
+                      </Field>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <Field label="Module" htmlFor="yt-module" required error={errors.moduleId}>
+                          <select
+                            id="yt-module"
+                            value={form.moduleId}
+                            onChange={(e) => {
+                              setField('moduleId', e.target.value);
+                              setField('topicId', '');
+                              setErrors((er) => ({ ...er, moduleId: undefined, topicId: undefined }));
+                            }}
+                            className={selectClass(errors.moduleId)}
+                            disabled={isSaving}
+                          >
+                            <option value="">Select module…</option>
+                            {modules.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.emoji} {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+
+                        <Field label="Topic" htmlFor="yt-topic" required error={errors.topicId}>
+                          <motion.div
+                            key={form.moduleId || 'none'}
+                            initial={{ opacity: 0.4 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ duration: 0.18 }}
+                          >
+                            <select
+                              id="yt-topic"
+                              value={form.topicId}
+                              onChange={(e) => {
+                                setField('topicId', e.target.value);
+                                setErrors((er) => ({ ...er, topicId: undefined }));
+                              }}
+                              className={selectClass(errors.topicId)}
+                              disabled={!form.moduleId || isSaving}
+                            >
+                              <option value="">{form.moduleId ? 'Select topic…' : 'Pick a module first'}</option>
+                              {filteredTopics.map((t) => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
+                          </motion.div>
+                        </Field>
+                      </div>
+
+                      <Field label="Duration" htmlFor="yt-duration" hint="Optional. Format: 15:30 or 1:02:45">
+                        <input
+                          id="yt-duration"
+                          type="text"
+                          value={form.duration}
+                          onChange={(e) => setField('duration', e.target.value)}
+                          className={inputClass()}
+                          placeholder="e.g. 15:30"
+                          disabled={isSaving}
+                        />
+                      </Field>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="playlist"
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.15 }}
+                      className="space-y-5"
+                    >
+                      <Field
+                        label="Playlist URL"
+                        htmlFor="pl-url"
+                        required
+                        error={pErrors.url}
+                        hint="Paste a youtube.com playlist link or playlist ID"
+                      >
+                        <div className="relative">
+                          <input
+                            id="pl-url"
+                            type="text"
+                            value={pForm.url}
+                            onChange={(e) => {
+                              setPField('url', e.target.value);
+                              if (pData) setPData(null);
+                            }}
+                            onBlur={handlePlaylistBlur}
+                            className={inputClass(pErrors.url)}
+                            placeholder="https://www.youtube.com/playlist?list=PL..."
+                            disabled={isSaving}
+                          />
+                          {isFetchingPlaylist && (
+                            <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#8a8f98]" />
+                          )}
+                        </div>
+                      </Field>
+
+                      <AnimatePresence initial={false}>
+                        {pData && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.25 }}
+                          >
+                            <div className="rounded-lg overflow-hidden bg-[#0f0f0f] border border-[#1f1f1f] p-3 flex gap-3">
+                              <div className="flex-shrink-0 w-32 aspect-video rounded-md overflow-hidden bg-[#141414]">
+                                {pData.playlist.thumbnail ? (
+                                  <img src={pData.playlist.thumbnail} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <ListVideo size={20} className="text-[#5a5f68]" strokeWidth={1.5} />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] font-mono uppercase tracking-wider text-[#5a5f68] mb-1 truncate">
+                                  {pData.playlist.channel || 'Channel unknown'}
+                                </p>
+                                <h4 className="text-[13px] font-medium text-[#f7f8f8] leading-snug line-clamp-2 mb-2">
+                                  {pData.playlist.title}
+                                </h4>
+                                <div className="flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider text-emerald-400 tabular-nums">
+                                  <Check size={11} strokeWidth={2.5} /> {pData.videos.length} videos found
+                                </div>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <Field label="Module" htmlFor="pl-module" required error={pErrors.moduleId}>
+                          <select
+                            id="pl-module"
+                            value={pForm.moduleId}
+                            onChange={(e) => {
+                              setPField('moduleId', e.target.value);
+                              setPField('topicId', '');
+                              setPErrors((er) => ({ ...er, moduleId: undefined, topicId: undefined }));
+                            }}
+                            className={selectClass(pErrors.moduleId)}
+                            disabled={isSaving}
+                          >
+                            <option value="">Select module…</option>
+                            {modules.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.emoji} {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+
+                        <Field label="Topic" htmlFor="pl-topic" required error={pErrors.topicId}>
+                          <motion.div
+                            key={pForm.moduleId || 'none'}
+                            initial={{ opacity: 0.4 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ duration: 0.18 }}
+                          >
+                            <select
+                              id="pl-topic"
+                              value={pForm.topicId}
+                              onChange={(e) => {
+                                setPField('topicId', e.target.value);
+                                setPErrors((er) => ({ ...er, topicId: undefined }));
+                              }}
+                              className={selectClass(pErrors.topicId)}
+                              disabled={!pForm.moduleId || isSaving}
+                            >
+                              <option value="">{pForm.moduleId ? 'Select topic…' : 'Pick a module first'}</option>
+                              {pFilteredTopics.map((t) => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
+                          </motion.div>
+                        </Field>
                       </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
-
-                {/* Title */}
-                <Field label="Video Title" htmlFor="yt-title" required error={errors.title}>
-                  {isFetchingMeta && !form.title ? (
-                    <Skeleton className="h-9" />
-                  ) : (
-                    <input
-                      id="yt-title"
-                      type="text"
-                      value={form.title}
-                      onChange={(e) => setField('title', e.target.value)}
-                      onBlur={() =>
-                        setErrors((er) => ({
-                          ...er,
-                          title: form.title.trim() ? undefined : 'Title is required',
-                        }))
-                      }
-                      className={inputClass(errors.title)}
-                      placeholder="Auto-filled from YouTube"
-                      disabled={isSaving}
-                    />
-                  )}
-                </Field>
-
-                {/* Channel */}
-                <Field label="Channel" htmlFor="yt-channel">
-                  {isFetchingMeta && !form.channel ? (
-                    <Skeleton className="h-9" />
-                  ) : (
-                    <input
-                      id="yt-channel"
-                      type="text"
-                      value={form.channel}
-                      onChange={(e) => setField('channel', e.target.value)}
-                      className={inputClass()}
-                      placeholder="Auto-filled from YouTube"
-                      disabled={isSaving}
-                    />
-                  )}
-                </Field>
-
-                {/* Module → Topic cascade */}
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label="Module" htmlFor="yt-module" required error={errors.moduleId}>
-                    <select
-                      id="yt-module"
-                      value={form.moduleId}
-                      onChange={(e) => {
-                        setField('moduleId', e.target.value);
-                        setField('topicId', '');
-                        setErrors((er) => ({ ...er, moduleId: undefined, topicId: undefined }));
-                      }}
-                      className={selectClass(errors.moduleId)}
-                      disabled={isSaving}
-                    >
-                      <option value="">Select module…</option>
-                      {modules.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.emoji} {m.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-
-                  <Field label="Topic" htmlFor="yt-topic" required error={errors.topicId}>
-                    <motion.div
-                      key={form.moduleId || 'none'}
-                      initial={{ opacity: 0.4 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ duration: 0.18 }}
-                    >
-                      <select
-                        id="yt-topic"
-                        value={form.topicId}
-                        onChange={(e) => {
-                          setField('topicId', e.target.value);
-                          setErrors((er) => ({ ...er, topicId: undefined }));
-                        }}
-                        className={selectClass(errors.topicId)}
-                        disabled={!form.moduleId || isSaving}
-                      >
-                        <option value="">
-                          {form.moduleId ? 'Select topic…' : 'Pick a module first'}
-                        </option>
-                        {filteredTopics.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </select>
-                    </motion.div>
-                  </Field>
-                </div>
-
-                {/* Duration (optional) */}
-                <Field label="Duration" htmlFor="yt-duration" hint="Optional. Format: 15:30 or 1:02:45">
-                  <input
-                    id="yt-duration"
-                    type="text"
-                    value={form.duration}
-                    onChange={(e) => setField('duration', e.target.value)}
-                    className={inputClass()}
-                    placeholder="e.g. 15:30"
-                    disabled={isSaving}
-                  />
-                </Field>
               </form>
 
               <div className="px-5 py-4 border-t border-[#1a1a1a] flex justify-end gap-3 flex-shrink-0">
@@ -486,7 +742,7 @@ export const AdminVideos = () => {
                 <button
                   type="submit"
                   onClick={handleSubmit}
-                  disabled={isSaving}
+                  disabled={isSaving || (mode === 'playlist' && !pData)}
                   className="flex items-center gap-2 px-4 py-2 bg-white text-black text-sm font-semibold rounded-md hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed transition-colors active:scale-[0.98]"
                 >
                   {isSaving ? (
@@ -495,7 +751,12 @@ export const AdminVideos = () => {
                     </>
                   ) : (
                     <>
-                      <Check size={14} strokeWidth={2.5} /> {editingId ? 'Save Changes' : 'Save Video'}
+                      <Check size={14} strokeWidth={2.5} />
+                      {editingId
+                        ? 'Save Changes'
+                        : mode === 'playlist'
+                        ? `Save Playlist${pData ? ` (${pData.videos.length})` : ''}`
+                        : 'Save Video'}
                     </>
                   )}
                 </button>
@@ -544,6 +805,27 @@ const Field: React.FC<{
       <p className="text-[11px] text-[#5a5f68]">{hint}</p>
     ) : null}
   </div>
+);
+
+const ModeButton: React.FC<{
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}> = ({ active, onClick, icon, label }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={
+      'flex items-center justify-center gap-2 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ' +
+      (active
+        ? 'bg-white/[0.06] text-white border border-white/[0.08]'
+        : 'text-[#8a8f98] hover:text-white border border-transparent')
+    }
+  >
+    {icon}
+    {label}
+  </button>
 );
 
 const Skeleton: React.FC<{ className?: string }> = ({ className = '' }) => (

@@ -28,10 +28,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [completedVideos, setCompletedVideos] = useState<Record<string, boolean>>({});
   const [isAdmin, setIsAdmin] = useState(false);
 
+  // Auth listener — sets `user`. Keep this callback synchronous: Supabase
+  // recommends queueing async work elsewhere so the listener doesn't deadlock
+  // the auth state machine.
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
-      setLoading(false);
-      // One-time migration from old key, then load
       const legacy = localStorage.getItem('local_progress');
       if (legacy && !localStorage.getItem('pdp_progress')) {
         localStorage.setItem('pdp_progress', legacy);
@@ -44,67 +45,76 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch {}
       }
       setIsAdmin(localStorage.getItem('isAdmin') === 'true');
+      setLoading(false);
       return;
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserData(session.user);
-      } else {
-        setLoading(false);
-      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserData(session.user);
-      } else {
-        setCompletedVideos({});
-        setIsAdmin(false);
-      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchUserData = async (currentUser: User) => {
-    if (!supabase) return;
-    try {
-      const { data, error } = await supabase
-        .from('user_progress')
-        .select('video_id')
-        .eq('user_id', currentUser.id);
-        
-      if (!error && data) {
-        const progressMap: Record<string, boolean> = {};
-        data.forEach((row) => {
-          progressMap[row.video_id] = true;
-        });
-        setCompletedVideos(progressMap);
-      }
+  // Whenever `user` changes (sign-in, sign-out, session restore), re-fetch
+  // their progress + role from Supabase. The cancelled flag avoids state
+  // updates from a stale fetch when the user signs out mid-flight.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
 
-      // Fetch user role
-      const { data: roleData, error: roleError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', currentUser.id)
-        .single();
-        
-      if (!roleError && roleData) {
-        setIsAdmin(roleData.role === 'admin');
-      } else {
-        // Fallback for mock if profile table doesn't exist yet
-        setIsAdmin(localStorage.getItem('isAdmin') === 'true' || currentUser.email === 'admin@prodesigner.com' || currentUser.email === 'hardiklakhani1908@gmail.com');
-      }
-
-    } catch (e) {
-      console.error('Error fetching data:', e);
+    if (!user) {
+      setCompletedVideos({});
+      setIsAdmin(false);
+      setLoading(false);
+      return;
     }
-    setLoading(false);
-  };
 
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: progress, error: progressError } = await supabase!
+          .from('user_progress')
+          .select('video_id')
+          .eq('user_id', user.id);
+        if (cancelled) return;
+
+        if (!progressError && progress) {
+          const progressMap: Record<string, boolean> = {};
+          for (const row of progress) progressMap[row.video_id] = true;
+          setCompletedVideos(progressMap);
+        }
+
+        const { data: roleData, error: roleError } = await supabase!
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+        if (cancelled) return;
+
+        if (!roleError && roleData) {
+          setIsAdmin(roleData.role === 'admin');
+        } else {
+          setIsAdmin(
+            localStorage.getItem('isAdmin') === 'true' ||
+              user.email === 'admin@prodesigner.com' ||
+              user.email === 'hardiklakhani1908@gmail.com'
+          );
+        }
+      } catch (e) {
+        console.error('Error fetching user data:', e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const toggleVideoCompletion = async (videoId: string) => {
     const isCompleted = completedVideos[videoId];
@@ -112,28 +122,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCompletedVideos(newProgress);
 
     if (!user || !supabase) {
-      // Local fallback
       localStorage.setItem('pdp_progress', JSON.stringify(newProgress));
       return;
     }
 
     try {
       if (isCompleted) {
-        // Remove progress
         await supabase
           .from('user_progress')
           .delete()
           .eq('user_id', user.id)
           .eq('video_id', videoId);
       } else {
-        // Add progress
         await supabase
           .from('user_progress')
           .insert({ user_id: user.id, video_id: videoId });
       }
     } catch (error) {
       console.error('Error updating progress:', error);
-      // Revert on error
       setCompletedVideos(completedVideos);
     }
   };

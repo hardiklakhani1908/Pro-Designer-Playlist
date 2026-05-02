@@ -1,3 +1,13 @@
+export function isYouTubeUrl(url: string): boolean {
+  try {
+    const u = new URL(url.trim());
+    const host = u.hostname.replace(/^www\./, '');
+    return host === 'youtu.be' || host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com');
+  } catch {
+    return false;
+  }
+}
+
 export type YouTubeKind = 'video' | 'playlist' | 'unknown';
 
 export interface ParsedYouTube {

@@ -58,7 +58,7 @@ export const PlaylistPage = () => {
       </div>
 
       {/* Header */}
-      <header className="mb-10 flex flex-col md:flex-row md:items-end gap-6 md:gap-8">
+      <header className="mb-8 md:mb-10 flex flex-col md:flex-row md:items-end gap-5 md:gap-8">
         <div className="flex-shrink-0 w-full md:w-72 aspect-video rounded-xl overflow-hidden bg-[#0f0f0f] border border-[#1a1a1a] relative">
           {playlist.thumbnail ? (
             <img src={playlist.thumbnail} alt="" className="w-full h-full object-cover" />
@@ -73,22 +73,26 @@ export const PlaylistPage = () => {
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-[#5a5f68] mb-3">
+          <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-[#5a5f68] mb-2 md:mb-3">
             {playlist.channel}
           </p>
-          <h1 className="text-2xl md:text-3xl font-medium tracking-tight text-[#f7f8f8] leading-tight mb-4">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-medium tracking-tight text-[#f7f8f8] leading-tight mb-4">
             {playlist.title}
           </h1>
-          <div className="flex items-center gap-6">
-            <div>
-              <div className="text-[11px] font-mono uppercase tracking-wider text-[#5a5f68] mb-1">Progress</div>
-              <div className="text-lg font-medium text-[#f7f8f8] tabular-nums">
-                {watched}<span className="text-[#5a5f68]"> / </span>{playlistVideos.length}
+          <div className="flex items-center gap-4 sm:gap-5 md:gap-6">
+            <div className="flex-shrink-0">
+              <div className="text-[10px] md:text-[11px] font-mono uppercase tracking-wider text-[#5a5f68] mb-1">
+                Progress
+              </div>
+              <div className="text-base md:text-lg font-medium text-[#f7f8f8] tabular-nums">
+                {watched}
+                <span className="text-[#5a5f68]"> / </span>
+                {playlistVideos.length}
               </div>
             </div>
-            <div className="h-10 w-px bg-[#1a1a1a]" aria-hidden />
-            <div className="flex-1 max-w-xs">
-              <div className="text-[11px] font-mono uppercase tracking-wider text-[#5a5f68] mb-1.5 tabular-nums">
+            <div className="h-9 md:h-10 w-px bg-[#1a1a1a] flex-shrink-0" aria-hidden />
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] md:text-[11px] font-mono uppercase tracking-wider text-[#5a5f68] mb-1.5 tabular-nums">
                 {percent}%
               </div>
               <div className="w-full bg-[#141414] rounded-full h-[3px] overflow-hidden">
@@ -159,7 +163,7 @@ export const PlaylistPage = () => {
                 <div className="p-4 flex gap-3">
                   <button
                     onClick={() => toggleVideoCompletion(video.id)}
-                    className="flex-shrink-0 mt-0.5 text-[#8a8f98] hover:text-white transition-colors"
+                    className="relative flex-shrink-0 mt-0.5 text-[#8a8f98] hover:text-white transition-colors before:content-[''] before:absolute before:-inset-3"
                     aria-label={isCompleted ? 'Mark as not watched' : 'Mark as watched'}
                   >
                     {isCompleted ? (

@@ -58,21 +58,21 @@ export const Home = () => {
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ type: 'spring', stiffness: 90, damping: 20 }}
-        className="mb-14"
+        className="mb-12 md:mb-14"
       >
         <div className="flex flex-col-reverse md:flex-row md:items-center md:justify-between gap-8 md:gap-12">
           <div className="flex-1 min-w-0">
             <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-[#5a5f68] mb-4">
               {staticData.project}
             </p>
-            <h1 className="text-3xl md:text-5xl font-medium tracking-tight leading-[1.05] text-[#f7f8f8] mb-5 max-w-[18ch]">
+            <h1 className="text-[28px] sm:text-3xl md:text-5xl font-medium tracking-tight leading-[1.1] md:leading-[1.05] text-[#f7f8f8] mb-4 md:mb-5 max-w-[18ch]">
               {motivationalLabel(overall.percent)}.
             </h1>
-            <p className="text-[15px] text-[#8a8f98] leading-relaxed max-w-[58ch]">
+            <p className="text-sm sm:text-[15px] text-[#8a8f98] leading-relaxed max-w-[58ch]">
               {staticData.description}
             </p>
 
-            <div className="mt-8 flex items-center gap-8">
+            <div className="mt-6 md:mt-8 flex items-center flex-wrap gap-x-5 gap-y-4 md:gap-x-8 md:flex-nowrap">
               <Stat label="Watched" value={`${overall.watched}`} />
               <Divider />
               <Stat label="Total videos" value={`${overall.total}`} />
@@ -81,14 +81,19 @@ export const Home = () => {
             </div>
           </div>
 
-          <div className="relative flex-shrink-0">
-            <ProgressArc percent={overall.percent} size={184} strokeWidth={10} />
+          <div className="relative flex-shrink-0 mx-auto md:mx-0">
+            <div className="hidden md:block">
+              <ProgressArc percent={overall.percent} size={184} strokeWidth={10} />
+            </div>
+            <div className="md:hidden">
+              <ProgressArc percent={overall.percent} size={148} strokeWidth={8} />
+            </div>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <div className="text-4xl font-medium tracking-tight text-[#f7f8f8] tabular-nums">
+              <div className="text-3xl md:text-4xl font-medium tracking-tight text-[#f7f8f8] tabular-nums">
                 {overall.percent}
-                <span className="text-xl text-[#5a5f68] font-normal">%</span>
+                <span className="text-lg md:text-xl text-[#5a5f68] font-normal">%</span>
               </div>
-              <div className="mt-1 text-[11px] font-mono uppercase tracking-wider text-[#5a5f68] tabular-nums">
+              <div className="mt-1 text-[10px] md:text-[11px] font-mono uppercase tracking-wider text-[#5a5f68] tabular-nums">
                 {overall.watched} / {overall.total}
               </div>
             </div>
@@ -215,14 +220,14 @@ export const Home = () => {
 
 const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   <div>
-    <div className="text-2xl font-medium tracking-tight text-[#f7f8f8] tabular-nums">{value}</div>
+    <div className="text-xl md:text-2xl font-medium tracking-tight text-[#f7f8f8] tabular-nums">{value}</div>
     <div className="text-[10px] font-mono uppercase tracking-wider text-[#5a5f68] mt-0.5">
       {label}
     </div>
   </div>
 );
 
-const Divider = () => <span aria-hidden className="h-8 w-px bg-[#1a1a1a]" />;
+const Divider = () => <span aria-hidden className="hidden md:block h-8 w-px bg-[#1a1a1a]" />;
 
 const StatusPill: React.FC<{ status: 'not-started' | 'in-progress' | 'completed'; accent: string }> = ({
   status,

@@ -218,7 +218,7 @@ export const TopicPage = () => {
                   <div className="p-4 flex gap-3">
                     <button
                       onClick={() => toggleVideoCompletion(video.id)}
-                      className="flex-shrink-0 mt-0.5 text-[#8a8f98] hover:text-white transition-colors"
+                      className="relative flex-shrink-0 mt-0.5 text-[#8a8f98] hover:text-white transition-colors before:content-[''] before:absolute before:-inset-3"
                       aria-label={isCompleted ? 'Mark as not watched' : 'Mark as watched'}
                     >
                       {isCompleted ? (

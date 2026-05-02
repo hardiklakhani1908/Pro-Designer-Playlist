@@ -47,11 +47,11 @@ export const Sidebar = ({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (o:
             Pro Designer
           </NavLink>
           <button
-            className="md:hidden text-[#8a8f98] hover:text-white"
+            className="md:hidden text-[#8a8f98] hover:text-white p-2 -mr-2 min-h-[44px] min-w-[44px] flex items-center justify-center"
             onClick={() => setIsOpen(false)}
             aria-label="Close menu"
           >
-            <X size={16} />
+            <X size={18} strokeWidth={1.75} />
           </button>
         </div>
 
@@ -61,7 +61,7 @@ export const Sidebar = ({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (o:
             end
             className={({ isActive }) =>
               cn(
-                'relative px-3 py-1.5 rounded-md transition-colors',
+                'relative px-3 py-2 min-h-[40px] flex items-center rounded-md transition-colors',
                 isActive
                   ? 'bg-white/[0.04] text-white'
                   : 'hover:bg-white/[0.03] hover:text-white'
@@ -93,7 +93,7 @@ export const Sidebar = ({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (o:
                 to={`/module/${mod.slug}`}
                 className={({ isActive }) =>
                   cn(
-                    'relative pl-3 pr-3 py-1.5 rounded-md transition-colors flex items-center gap-2',
+                    'relative pl-3 pr-3 py-2 min-h-[40px] rounded-md transition-colors flex items-center gap-2',
                     isActive
                       ? 'bg-white/[0.04] text-white'
                       : 'hover:bg-white/[0.03] hover:text-[#e7e8ea]'
@@ -129,7 +129,7 @@ export const Sidebar = ({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (o:
                 to="/admin"
                 className={({ isActive }) =>
                   cn(
-                    'px-3 py-1.5 rounded-md transition-colors flex items-center gap-2',
+                    'px-3 py-2 min-h-[40px] rounded-md transition-colors flex items-center gap-2',
                     isActive
                       ? 'bg-yellow-500/10 text-yellow-500'
                       : 'hover:bg-yellow-500/10 hover:text-yellow-500'

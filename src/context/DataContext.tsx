@@ -29,12 +29,23 @@ export interface Video {
   duration: string;
   completed?: boolean;
   topic_id: string;
+  playlist_id?: string;
+}
+
+export interface Playlist {
+  id: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+  video_count: number;
+  topic_id: string;
 }
 
 interface DataContextType {
   modules: Module[];
   topics: Topic[];
   videos: Video[];
+  playlists: Playlist[];
   addVideo: (video: Omit<Video, 'id'>) => void;
   updateVideo: (id: string, video: Partial<Video>) => void;
   deleteVideo: (id: string) => void;
@@ -47,16 +58,29 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | null>(null);
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [data, setData] = useState<{ modules: Module[], topics: Topic[], videos: Video[] }>(() => {
+  const [data, setData] = useState<{ modules: Module[], topics: Topic[], videos: Video[], playlists: Playlist[] }>(() => {
+    const fresh = {
+      modules: initialData.modules,
+      topics: initialData.topics,
+      videos: initialData.videos as Video[],
+      playlists: (initialData as { playlists?: Playlist[] }).playlists ?? [],
+    };
     const saved = localStorage.getItem('app_data');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Stale-shape detector: reject caches that predate the playlists field
+        // or were saved with fewer playlists than ship in code.
+        const hasPlaylistField = Array.isArray(parsed.playlists);
+        const hasEnoughPlaylists = hasPlaylistField && parsed.playlists.length >= fresh.playlists.length;
+        if (hasPlaylistField && hasEnoughPlaylists) {
+          return parsed;
+        }
       } catch (e) {
         console.error('Failed to parse app_data', e);
       }
     }
-    return initialData;
+    return fresh;
   });
 
   useEffect(() => {
@@ -164,6 +188,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       modules: data.modules,
       topics: data.topics,
       videos: data.videos,
+      playlists: data.playlists,
       addVideo,
       updateVideo,
       deleteVideo,

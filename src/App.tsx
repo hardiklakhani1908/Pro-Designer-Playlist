@@ -4,6 +4,7 @@ import { AppLayout } from './layout/AppLayout';
 import { Home } from './pages/Home';
 import { ModulePage } from './pages/ModulePage';
 import { TopicPage } from './pages/TopicPage';
+import { PlaylistPage } from './pages/PlaylistPage';
 import { Login } from './pages/Login';
 import { useAuth } from './context/AuthContext';
 
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/module/:moduleSlug" element={<ModulePage />} />
         <Route path="/topic/:topicSlug" element={<TopicPage />} />
+        <Route path="/playlist/:playlistId" element={<PlaylistPage />} />
         
         {/* Admin Routes */}
         <Route path="/admin" element={<AdminLayout />}>

@@ -56,6 +56,26 @@ interface OutputVideo {
   topic: string;
   duration: string;
   topic_id: string;
+  playlist_id?: string;
+}
+
+interface OutputPlaylist {
+  id: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+  video_count: number;
+  topic_id: string;
+}
+
+interface PlaylistSnippet {
+  id: string;
+  snippet: {
+    title: string;
+    channelTitle?: string;
+    thumbnails?: { high?: { url: string }; medium?: { url: string }; default?: { url: string } };
+  };
+  contentDetails?: { itemCount?: number };
 }
 
 function parsePlaylistArg(arg: string): string {
@@ -139,7 +159,27 @@ function buildVideo(
     topic: '',
     duration: durations[id] || '',
     topic_id: topicId,
+    playlist_id: playlistId,
   };
+}
+
+async function fetchPlaylistsMeta(playlistIds: string[]): Promise<Map<string, PlaylistSnippet>> {
+  const out = new Map<string, PlaylistSnippet>();
+  for (let i = 0; i < playlistIds.length; i += 50) {
+    const chunk = playlistIds.slice(i, i + 50);
+    const url = new URL('https://www.googleapis.com/youtube/v3/playlists');
+    url.searchParams.set('part', 'snippet,contentDetails');
+    url.searchParams.set('id', chunk.join(','));
+    url.searchParams.set('key', API_KEY!);
+
+    const res = await fetch(url.toString());
+    const data = (await res.json()) as { items?: PlaylistSnippet[]; error?: { message: string } };
+    if (data.error) throw new Error(data.error.message);
+    for (const p of data.items || []) {
+      out.set(p.id, p);
+    }
+  }
+  return out;
 }
 
 async function expandPlaylist(playlistId: string, topicId: string): Promise<OutputVideo[]> {
@@ -185,51 +225,99 @@ async function runSingle(playlistId: string, topicId: string, outFile?: string) 
 async function runAll(outFile: string) {
   const mod = await import('../src/data/libraryData');
   const existing = (mod.libraryData?.videos ?? []) as OutputVideo[];
+  const existingPlaylists = ((mod.libraryData as { playlists?: OutputPlaylist[] })?.playlists ?? []) as OutputPlaylist[];
 
-  const singleVideos = existing.filter((v) => v.youtube_id && v.youtube_id.length > 0);
-  const playlistEntries = existing.filter(
+  // Single videos = those without a derived playlist origin (no playlist_id and
+  // no expansion-shaped id).
+  const isExpanded = (v: OutputVideo) => Boolean(v.playlist_id) || /^vid-PL[\w-]+-\d+$/.test(v.id);
+  const singleVideos = existing.filter((v) => v.youtube_id && v.youtube_id.length > 0 && !isExpanded(v));
+
+  // Playlist source: prefer existing playlists registry; fall back to legacy
+  // placeholder entries (youtube_id empty + list= in URL).
+  const placeholderEntries = existing.filter(
     (v) => (!v.youtube_id || v.youtube_id.length === 0) && v.youtube_url?.includes('list=')
   );
 
-  console.error(`Found ${existing.length} total entries in libraryData.videos`);
-  console.error(`  - ${singleVideos.length} single videos (kept as-is)`);
-  console.error(`  - ${playlistEntries.length} playlist entries (expanding)\n`);
+  type Source = { playlistId: string; topicId: string };
+  let sources: Source[];
+  if (existingPlaylists.length > 0) {
+    sources = existingPlaylists.map((p) => ({ playlistId: p.id, topicId: p.topic_id }));
+  } else if (placeholderEntries.length > 0) {
+    sources = placeholderEntries.map((e) => ({ playlistId: parsePlaylistArg(e.youtube_url), topicId: e.topic_id }));
+  } else {
+    // Derive from already-expanded video IDs (vid-PL...-N) so we can re-build
+    // the playlists[] registry without losing data.
+    const seen = new Map<string, string>();
+    for (const v of existing) {
+      const m = v.id.match(/^vid-(PL[\w-]+)-\d+$/);
+      if (m) {
+        const pid = m[1];
+        if (!seen.has(pid)) seen.set(pid, v.topic_id);
+      }
+    }
+    sources = Array.from(seen.entries()).map(([playlistId, topicId]) => ({ playlistId, topicId }));
+  }
 
-  if (playlistEntries.length === 0) {
+  console.error(`Found ${existing.length} total video entries`);
+  console.error(`  - ${singleVideos.length} single videos (kept as-is)`);
+  console.error(`  - ${sources.length} playlists to (re)expand\n`);
+
+  if (sources.length === 0) {
     console.error('Nothing to expand.');
     return;
   }
 
+  // Fetch playlist metadata in batches first so we can label the progress
+  // lines with real titles and emit a clean playlists[] array.
+  console.error('Fetching playlist metadata...');
+  const meta = await fetchPlaylistsMeta(sources.map((s) => s.playlistId));
+  console.error(`  -> ${meta.size}/${sources.length} resolved\n`);
+
   const expanded: OutputVideo[] = [];
+  const playlists: OutputPlaylist[] = [];
   let okCount = 0;
   let failCount = 0;
   const failures: { title: string; error: string }[] = [];
 
-  for (let i = 0; i < playlistEntries.length; i++) {
-    const entry = playlistEntries[i];
-    const playlistId = parsePlaylistArg(entry.youtube_url);
-    const label = `[${(i + 1).toString().padStart(2, '0')}/${playlistEntries.length}] ${truncate(entry.title || entry.channel || playlistId, 60)}`;
+  for (let i = 0; i < sources.length; i++) {
+    const { playlistId, topicId } = sources[i];
+    const m = meta.get(playlistId);
+    const title = m?.snippet.title || playlistId;
+    const label = `[${(i + 1).toString().padStart(2, '0')}/${sources.length}] ${truncate(title, 56)}`;
     process.stderr.write(`${label} ... `);
     try {
-      const videos = await expandPlaylist(playlistId, entry.topic_id);
+      const videos = await expandPlaylist(playlistId, topicId);
       expanded.push(...videos);
+      const thumb =
+        m?.snippet.thumbnails?.high?.url ||
+        m?.snippet.thumbnails?.medium?.url ||
+        videos[0]?.thumbnail ||
+        '';
+      playlists.push({
+        id: playlistId,
+        title,
+        channel: m?.snippet.channelTitle || videos[0]?.channel || '',
+        thumbnail: thumb,
+        video_count: videos.length,
+        topic_id: topicId,
+      });
       okCount++;
       console.error(`${videos.length} videos`);
     } catch (err) {
       failCount++;
       const msg = err instanceof Error ? err.message : String(err);
-      failures.push({ title: entry.title || playlistId, error: msg });
+      failures.push({ title, error: msg });
       console.error(`FAILED: ${msg}`);
     }
   }
 
-  const final = [...singleVideos, ...expanded];
-  await writeFile(outFile, JSON.stringify(final, null, 2) + '\n');
+  const finalVideos = [...singleVideos, ...expanded];
+  await writeFile(outFile, JSON.stringify({ videos: finalVideos, playlists }, null, 2) + '\n');
 
   console.error('');
-  console.error(`Wrote ${final.length} videos to ${outFile}`);
+  console.error(`Wrote ${finalVideos.length} videos and ${playlists.length} playlists to ${outFile}`);
   console.error(`  - ${singleVideos.length} kept`);
-  console.error(`  - ${expanded.length} expanded from ${okCount}/${playlistEntries.length} playlists`);
+  console.error(`  - ${expanded.length} expanded from ${okCount}/${sources.length} playlists`);
   if (failCount > 0) {
     console.error(`\n${failCount} playlist(s) failed:`);
     for (const f of failures) {

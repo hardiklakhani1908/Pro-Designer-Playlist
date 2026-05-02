@@ -18,8 +18,12 @@
  *   Output is a complete videos[] array: existing single videos kept as-is,
  *   playlist entries replaced by their expanded children.
  */
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
 import { writeFile } from 'fs/promises';
+
+// Vite convention: .env.local takes precedence over .env
+loadEnv({ path: '.env.local' });
+loadEnv({ path: '.env' });
 
 const API_KEY = process.env.YOUTUBE_API_KEY;
 if (!API_KEY) {

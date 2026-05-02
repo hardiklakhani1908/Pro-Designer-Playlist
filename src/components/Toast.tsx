@@ -2,11 +2,17 @@ import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, AlertCircle, X } from 'lucide-react';
 
-export type ToastVariant = 'success' | 'error';
+export type ToastVariant = 'success' | 'error' | 'info';
+
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
 
 export interface ToastState {
   message: string;
   variant?: ToastVariant;
+  action?: ToastAction;
 }
 
 interface ToastProps {
@@ -15,10 +21,13 @@ interface ToastProps {
   durationMs?: number;
 }
 
-export const Toast: React.FC<ToastProps> = ({ toast, onClose, durationMs = 3000 }) => {
+export const Toast: React.FC<ToastProps> = ({ toast, onClose, durationMs }) => {
   useEffect(() => {
     if (!toast) return;
-    const id = setTimeout(onClose, durationMs);
+    // Toasts with an action stay longer so the user can tap it.
+    const fallback = toast.action ? 6000 : 3000;
+    const ms = durationMs ?? fallback;
+    const id = setTimeout(onClose, ms);
     return () => clearTimeout(id);
   }, [toast, durationMs, onClose]);
 
@@ -41,15 +50,34 @@ export const Toast: React.FC<ToastProps> = ({ toast, onClose, durationMs = 3000 
               className={
                 toast.variant === 'error'
                   ? 'flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center bg-red-500/15 text-red-400'
+                  : toast.variant === 'info'
+                  ? 'flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center bg-sky-500/15 text-sky-400'
                   : 'flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center bg-emerald-500/15 text-emerald-400'
               }
             >
-              {toast.variant === 'error' ? <AlertCircle size={14} strokeWidth={2.25} /> : <Check size={14} strokeWidth={2.5} />}
+              {toast.variant === 'error' ? (
+                <AlertCircle size={14} strokeWidth={2.25} />
+              ) : toast.variant === 'info' ? (
+                <AlertCircle size={14} strokeWidth={2.25} />
+              ) : (
+                <Check size={14} strokeWidth={2.5} />
+              )}
             </div>
             <p className="flex-1 text-[13px] text-[#e7e8ea] leading-snug">{toast.message}</p>
+            {toast.action && (
+              <button
+                onClick={() => {
+                  toast.action!.onClick();
+                  onClose();
+                }}
+                className="flex-shrink-0 px-3 py-1.5 rounded-md bg-white text-black text-[12px] font-semibold hover:bg-gray-200 transition-colors active:scale-[0.97]"
+              >
+                {toast.action.label}
+              </button>
+            )}
             <button
               onClick={onClose}
-              className="text-[#5a5f68] hover:text-white transition-colors flex-shrink-0"
+              className="text-[#5a5f68] hover:text-white transition-colors flex-shrink-0 p-1 -m-1 min-w-[28px] min-h-[28px] flex items-center justify-center"
               aria-label="Dismiss"
             >
               <X size={14} strokeWidth={2} />

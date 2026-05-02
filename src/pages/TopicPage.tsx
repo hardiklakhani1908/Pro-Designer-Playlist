@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { useParams, Link, Navigate } from 'react-router-dom';
+import { useParams, Link, Navigate, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowLeft, CheckCircle2, Circle, ListVideo, ArrowUpRight } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
 import { VideoModal } from '../components/VideoModal';
+import { Toast, type ToastState } from '../components/Toast';
 import { parseYouTubeUrl, getThumbnailUrl } from '../lib/youtube';
 
 interface SelectedMedia {
@@ -16,9 +17,23 @@ interface SelectedMedia {
 
 export const TopicPage = () => {
   const { topicSlug } = useParams();
-  const { completedVideos, toggleVideoCompletion } = useAuth();
+  const navigate = useNavigate();
+  const { user, completedVideos, toggleVideoCompletion } = useAuth();
   const { modules, topics, videos: allVideos, playlists } = useData();
   const [selectedVideo, setSelectedVideo] = useState<SelectedMedia | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
+
+  const handleToggle = (videoId: string) => {
+    if (!user) {
+      setToast({
+        message: 'Sign in to save your progress',
+        variant: 'info',
+        action: { label: 'Sign in', onClick: () => navigate('/login') },
+      });
+      return;
+    }
+    toggleVideoCompletion(videoId);
+  };
 
   const topic = topics.find((t) => t.slug === topicSlug);
   if (!topic) return <Navigate to="/" />;
@@ -217,7 +232,7 @@ export const TopicPage = () => {
 
                   <div className="p-4 flex gap-3">
                     <button
-                      onClick={() => toggleVideoCompletion(video.id)}
+                      onClick={() => handleToggle(video.id)}
                       className="relative flex-shrink-0 mt-0.5 text-[#8a8f98] hover:text-white transition-colors before:content-[''] before:absolute before:-inset-3"
                       aria-label={isCompleted ? 'Mark as not watched' : 'Mark as watched'}
                     >
@@ -259,6 +274,8 @@ export const TopicPage = () => {
         playlistId={selectedVideo?.playlistId || null}
         title={selectedVideo?.title || null}
       />
+
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 };
